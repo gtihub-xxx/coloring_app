@@ -1,0 +1,1022 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Palette, Eraser, RotateCcw, Download, Plus, Minus, PaintBucket, Undo2, Redo2 } from 'lucide-react';
+
+export default function ColoringApp() {
+  const imageCanvasRef = useRef(null);  // 元画像用キャンバス（白背景）
+  const drawCanvasRef = useRef(null);   // 描画用キャンバス（塗り絵）
+  const lineCanvasRef = useRef(null);   // 線画マスクキャンバス（最上位）
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [currentColor, setCurrentColor] = useState('#FF6B9D');
+  const [brushSize, setBrushSize] = useState(10);
+  const [tool, setTool] = useState('brush');
+  const [uploadedImage, setUploadedImage] = useState(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [brightnessThreshold, setBrightnessThreshold] = useState(180); // 線画保護の閾値
+  const [history, setHistory] = useState([]); // 描画履歴
+  const [historyIndex, setHistoryIndex] = useState(-1); // 現在の履歴位置
+  const maxHistory = 20; // 最大履歴数
+
+  const colors = [
+    '#FF6B9D', '#C44569', '#F8B500', '#FFA07A',
+    '#98D8C8', '#6BCB77', '#4D96FF', '#8B5CF6',
+    '#E84393', '#FDCB6E', '#00B894', '#0984E3',
+    '#2D3436', '#FFFFFF', '#95A5A6', '#34495E'
+  ];
+
+  useEffect(() => {
+    const imageCanvas = imageCanvasRef.current;
+    const drawCanvas = drawCanvasRef.current;
+    const lineCanvas = lineCanvasRef.current;
+    
+    if (imageCanvas && drawCanvas && lineCanvas) {
+      // 描画キャンバスの設定
+      const ctx = drawCanvas.getContext('2d');
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // 初期サイズ設定
+      if (!uploadedImage) {
+        imageCanvas.width = canvasSize.width;
+        imageCanvas.height = canvasSize.height;
+        drawCanvas.width = canvasSize.width;
+        drawCanvas.height = canvasSize.height;
+        lineCanvas.width = canvasSize.width;
+        lineCanvas.height = canvasSize.height;
+        
+        const imgCtx = imageCanvas.getContext('2d');
+        imgCtx.fillStyle = '#f8f9fa';
+        imgCtx.fillRect(0, 0, canvasSize.width, canvasSize.height);
+      }
+    }
+
+    // キーボードショートカット
+    const handleKeyDown = (e) => {
+      // Ctrl+Z または Cmd+Z で Undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      }
+      // Ctrl+Y または Cmd+Shift+Z で Redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [uploadedImage, canvasSize, historyIndex, history]);
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) {
+      console.log('ファイルが選択されていません');
+      return;
+    }
+
+    // 画像ファイルかチェック
+    if (!file.type.startsWith('image/')) {
+      alert('画像ファイルを選択してください');
+      return;
+    }
+
+    console.log('ファイル読み込み開始:', file.name);
+
+    const reader = new FileReader();
+    
+    reader.onerror = () => {
+      console.error('ファイル読み込みエラー');
+      alert('ファイルの読み込みに失敗しました');
+    };
+    
+    reader.onload = (event) => {
+      console.log('ファイル読み込み完了');
+      const img = new Image();
+      
+      img.onerror = () => {
+        console.error('画像の読み込みエラー');
+        alert('画像の読み込みに失敗しました');
+      };
+      
+      img.onload = () => {
+        console.log('画像読み込み成功:', img.width, 'x', img.height);
+        
+        try {
+          const imageCanvas = imageCanvasRef.current;
+          const drawCanvas = drawCanvasRef.current;
+          const lineCanvas = lineCanvasRef.current;
+          
+          if (!imageCanvas || !drawCanvas || !lineCanvas) {
+            console.error('キャンバスが見つかりません');
+            return;
+          }
+
+          const maxWidth = 800;
+          const maxHeight = 600;
+          let width = img.width;
+          let height = img.height;
+
+          // アスペクト比を保持してリサイズ
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
+
+          console.log('キャンバスサイズ設定:', width, 'x', height);
+
+          // 全てのキャンバスのサイズを設定
+          imageCanvas.width = width;
+          imageCanvas.height = height;
+          drawCanvas.width = width;
+          drawCanvas.height = height;
+          lineCanvas.width = width;
+          lineCanvas.height = height;
+          
+          setCanvasSize({ width, height });
+
+          // 元画像キャンバスに白背景と画像を描画
+          const imgCtx = imageCanvas.getContext('2d');
+          imgCtx.fillStyle = '#ffffff';
+          imgCtx.fillRect(0, 0, width, height);
+          imgCtx.drawImage(img, 0, 0, width, height);
+          
+          // 描画キャンバスをクリア
+          const drawCtx = drawCanvas.getContext('2d');
+          drawCtx.clearRect(0, 0, width, height);
+          drawCtx.lineCap = 'round';
+          drawCtx.lineJoin = 'round';
+
+          // 線画マスクを作成（暗い部分のみを抽出）
+          const lineCtx = lineCanvas.getContext('2d');
+          lineCtx.clearRect(0, 0, width, height);
+          lineCtx.drawImage(img, 0, 0, width, height);
+          
+          // 線画マスクを作成：明るい部分を透明にする
+          const imageData = lineCtx.getImageData(0, 0, width, height);
+          const data = imageData.data;
+          
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const brightness = (r + g + b) / 3;
+            
+            // 明るい部分（線画ではない部分）を透明にする
+            if (brightness >= brightnessThreshold) {
+              data[i + 3] = 0; // アルファチャンネルを0（透明）に
+            }
+          }
+          
+          lineCtx.putImageData(imageData, 0, 0);
+
+          // 状態を更新（描画完了後）
+          setUploadedImage(event.target.result);
+          
+          // 履歴をリセット
+          setHistory([]);
+          setHistoryIndex(-1);
+          
+          console.log('アップロード完了');
+        } catch (error) {
+          console.error('キャンバス描画エラー:', error);
+          alert('画像の表示に失敗しました');
+        }
+      };
+      
+      img.src = event.target.result;
+    };
+    
+    reader.readAsDataURL(file);
+  };
+
+  const startDrawing = (e) => {
+    setIsDrawing(true);
+    draw(e);
+  };
+
+  const stopDrawing = () => {
+    if (isDrawing) {
+      saveToHistory();
+    }
+    setIsDrawing(false);
+    const ctx = drawCanvasRef.current.getContext('2d');
+    ctx.beginPath();
+  };
+
+  // 現在の描画状態を履歴に保存
+  const saveToHistory = () => {
+    const canvas = drawCanvasRef.current;
+    if (!canvas) return;
+
+    const imageData = canvas.toDataURL();
+    
+    // 現在のindex以降の履歴を削除（新しい操作をした場合）
+    const newHistory = history.slice(0, historyIndex + 1);
+    
+    // 新しい状態を追加
+    newHistory.push(imageData);
+    
+    // 最大履歴数を超えた場合、古い履歴を削除
+    if (newHistory.length > maxHistory) {
+      newHistory.shift();
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+    } else {
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+    }
+  };
+
+  // 操作を戻す（Undo）
+  const undo = () => {
+    if (historyIndex <= 0) {
+      // 最初の状態（空の状態）に戻る
+      const canvas = drawCanvasRef.current;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setHistoryIndex(-1);
+      return;
+    }
+
+    const canvas = drawCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+    };
+    
+    img.src = history[historyIndex - 1];
+    setHistoryIndex(historyIndex - 1);
+  };
+
+  // 操作をやり直す（Redo）
+  const redo = () => {
+    if (historyIndex >= history.length - 1) return;
+
+    const canvas = drawCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+    };
+    
+    img.src = history[historyIndex + 1];
+    setHistoryIndex(historyIndex + 1);
+  };
+
+  // 塗りつぶし機能（フラッドフィル）
+  const floodFill = (e) => {
+    const canvas = drawCanvasRef.current;
+    const imageCanvas = imageCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    
+    let clientX, clientY;
+    if (e.type.startsWith('touch')) {
+      e.preventDefault();
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    // キャンバスのスケールを考慮した座標計算
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = Math.floor((clientX - rect.left) * scaleX);
+    const y = Math.floor((clientY - rect.top) * scaleY);
+
+    // 範囲チェック
+    if (x < 0 || x >= canvas.width || y < 0 || y >= canvas.height) return;
+
+    // 描画レイヤーと元画像レイヤーを合成した画像データを取得
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // 元画像を描画
+    tempCtx.drawImage(imageCanvas, 0, 0);
+    // 描画レイヤーを重ねる
+    tempCtx.drawImage(canvas, 0, 0);
+    
+    const imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    const targetColor = getPixelColor(data, x, y, canvas.width);
+    const fillColor = hexToRgb(currentColor);
+    
+    // 同じ色の場合は何もしない
+    if (colorsMatch(targetColor, fillColor)) return;
+    
+    // 元画像の線画情報を取得
+    const imgCtx = imageCanvas.getContext('2d');
+    const originalData = imgCtx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // フラッドフィルアルゴリズム（スタックベース）
+    const stack = [[x, y]];
+    const visited = new Set();
+    const maxIterations = 50000; // 無限ループ防止
+    let iterations = 0;
+    
+    while (stack.length > 0 && iterations < maxIterations) {
+      iterations++;
+      const [px, py] = stack.pop();
+      const key = `${px},${py}`;
+      
+      if (visited.has(key)) continue;
+      if (px < 0 || px >= canvas.width || py < 0 || py >= canvas.height) continue;
+      
+      const currentColor = getPixelColor(data, px, py, canvas.width);
+      
+      // 元画像の明度をチェックして線画部分はスキップ
+      const origIndex = (py * canvas.width + px) * 4;
+      const origBrightness = (originalData.data[origIndex] + originalData.data[origIndex + 1] + originalData.data[origIndex + 2]) / 3;
+      if (origBrightness < brightnessThreshold) continue;
+      
+      if (!colorsMatch(currentColor, targetColor)) continue;
+      
+      visited.add(key);
+      
+      // ピクセルを塗る
+      setPixelColor(ctx, px, py, fillColor);
+      
+      // 隣接ピクセルをスタックに追加
+      stack.push([px + 1, py]);
+      stack.push([px - 1, py]);
+      stack.push([px, py + 1]);
+      stack.push([px, py - 1]);
+    }
+    
+    // 塗りつぶし完了後に履歴を保存
+    saveToHistory();
+  };
+
+  const getPixelColor = (data, x, y, width) => {
+    const index = (y * width + x) * 4;
+    return {
+      r: data[index],
+      g: data[index + 1],
+      b: data[index + 2],
+      a: data[index + 3]
+    };
+  };
+
+  const setPixelColor = (ctx, x, y, color) => {
+    ctx.fillStyle = `rgba(${color.r}, ${color.g}, ${color.b}, 1)`;
+    ctx.fillRect(x, y, 1, 1);
+  };
+
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : { r: 0, g: 0, b: 0 };
+  };
+
+  const colorsMatch = (a, b, tolerance = 10) => {
+    return Math.abs(a.r - b.r) <= tolerance &&
+           Math.abs(a.g - b.g) <= tolerance &&
+           Math.abs(a.b - b.b) <= tolerance;
+  };
+
+  const handleCanvasClick = (e) => {
+    if (tool === 'fill') {
+      floodFill(e);
+    }
+  };
+
+  const draw = (e) => {
+    if (!isDrawing && e.type !== 'mousedown' && e.type !== 'touchstart') return;
+
+    const canvas = drawCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    
+    let clientX, clientY;
+    if (e.type.startsWith('touch')) {
+      e.preventDefault();
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    // キャンバスのスケールを考慮した座標計算
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    if (tool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineWidth = brushSize * 2;
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.lineWidth = brushSize;
+      ctx.strokeStyle = currentColor;
+    }
+
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+
+  const clearCanvas = () => {
+    const drawCanvas = drawCanvasRef.current;
+    const drawCtx = drawCanvas.getContext('2d');
+    
+    // 描画レイヤーをクリア
+    drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    
+    // 履歴を保存
+    saveToHistory();
+  };
+
+  const downloadImage = () => {
+    const imageCanvas = imageCanvasRef.current;
+    const drawCanvas = drawCanvasRef.current;
+    const lineCanvas = lineCanvasRef.current;
+    
+    // 一時的なキャンバスで3層を合成
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = imageCanvas.width;
+    tempCanvas.height = imageCanvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    
+    // 元画像を描画（白背景）
+    tempCtx.drawImage(imageCanvas, 0, 0);
+    // 描画レイヤーを重ねる
+    tempCtx.drawImage(drawCanvas, 0, 0);
+    // 線画マスクを最上位に重ねる
+    tempCtx.drawImage(lineCanvas, 0, 0);
+    
+    const link = document.createElement('a');
+    link.download = 'my-coloring.png';
+    link.href = tempCanvas.toDataURL();
+    link.click();
+  };
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      padding: '2rem',
+      fontFamily: '"Fredoka", "Comic Neue", cursive'
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap');
+        
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+        }
+        
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+        }
+        
+        .tool-btn {
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .tool-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 16px rgba(0,0,0,0.2);
+        }
+        
+        .tool-btn:active {
+          transform: scale(0.95);
+        }
+        
+        .color-swatch {
+          transition: all 0.2s ease;
+        }
+        
+        .color-swatch:hover {
+          transform: scale(1.15);
+        }
+      `}</style>
+
+      <div style={{
+        maxWidth: '1200px',
+        margin: '0 auto'
+      }}>
+        {/* Header */}
+        <div style={{
+          textAlign: 'center',
+          marginBottom: '2rem',
+          animation: 'float 3s ease-in-out infinite'
+        }}>
+          <h1 style={{
+            fontSize: '3rem',
+            fontWeight: '700',
+            color: '#fff',
+            margin: '0',
+            textShadow: '4px 4px 0px rgba(0,0,0,0.2)',
+            letterSpacing: '2px'
+          }}>
+            🎨 ぬりえスタジオ
+          </h1>
+          <p style={{
+            color: 'rgba(255,255,255,0.9)',
+            fontSize: '1.1rem',
+            marginTop: '0.5rem'
+          }}>
+            画像をアップロードして、自由に色を塗ろう！
+          </p>
+        </div>
+
+        {/* Main Container */}
+        <div style={{
+          background: 'rgba(255,255,255,0.95)',
+          borderRadius: '24px',
+          padding: '2rem',
+          boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+        }}>
+          {/* Upload Section */}
+          {!uploadedImage && (
+            <div style={{
+              textAlign: 'center',
+              padding: '4rem 2rem'
+            }}>
+              <label style={{
+                display: 'inline-block',
+                padding: '1.5rem 3rem',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: '#fff',
+                borderRadius: '16px',
+                fontSize: '1.2rem',
+                fontWeight: '600',
+                cursor: 'pointer',
+                boxShadow: '0 8px 24px rgba(102,126,234,0.4)',
+                animation: 'pulse 2s ease-in-out infinite'
+              }}>
+                <Upload size={24} style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+                画像を選択
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  onClick={(e) => e.target.value = null}
+                  style={{ display: 'none' }}
+                />
+              </label>
+              <p style={{
+                marginTop: '1.5rem',
+                color: '#666',
+                fontSize: '1rem'
+              }}>
+                線画やぬりえ用の画像をアップロードしてください
+              </p>
+            </div>
+          )}
+
+          {/* Tools and Canvas */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: uploadedImage ? '200px 1fr' : '1fr',
+            gap: '2rem'
+          }}>
+            {/* Toolbar */}
+            {uploadedImage && (
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.5rem'
+              }}>
+                {/* Color Palette */}
+                <div style={{
+                  background: '#f8f9fa',
+                  borderRadius: '16px',
+                  padding: '1rem'
+                }}>
+                  <h3 style={{
+                    fontSize: '0.9rem',
+                    fontWeight: '600',
+                    color: '#333',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    <Palette size={18} />
+                    カラーパレット
+                  </h3>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(4, 1fr)',
+                    gap: '0.5rem'
+                  }}>
+                    {colors.map((color) => (
+                      <button
+                        key={color}
+                        className="color-swatch"
+                        onClick={() => {
+                          setCurrentColor(color);
+                          setTool('brush');
+                        }}
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '8px',
+                          border: currentColor === color ? '3px solid #667eea' : '2px solid #ddd',
+                          background: color,
+                          cursor: 'pointer',
+                          boxShadow: currentColor === color ? '0 4px 12px rgba(102,126,234,0.4)' : 'none'
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Brush Size */}
+                <div style={{
+                  background: '#f8f9fa',
+                  borderRadius: '16px',
+                  padding: '1rem'
+                }}>
+                  <h3 style={{
+                    fontSize: '0.9rem',
+                    fontWeight: '600',
+                    color: '#333',
+                    marginBottom: '1rem'
+                  }}>
+                    ブラシサイズ
+                  </h3>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginBottom: '0.5rem'
+                  }}>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setBrushSize(Math.max(2, brushSize - 2))}
+                      style={{
+                        padding: '0.5rem',
+                        background: '#fff',
+                        border: '2px solid #ddd',
+                        borderRadius: '8px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Minus size={16} />
+                    </button>
+                    <div style={{
+                      flex: 1,
+                      textAlign: 'center',
+                      fontSize: '1.1rem',
+                      fontWeight: '600',
+                      color: '#667eea'
+                    }}>
+                      {brushSize}px
+                    </div>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setBrushSize(Math.min(50, brushSize + 2))}
+                      style={{
+                        padding: '0.5rem',
+                        background: '#fff',
+                        border: '2px solid #ddd',
+                        borderRadius: '8px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                  <input
+                    type="range"
+                    min="2"
+                    max="50"
+                    value={brushSize}
+                    onChange={(e) => setBrushSize(Number(e.target.value))}
+                    style={{
+                      width: '100%',
+                      cursor: 'pointer'
+                    }}
+                  />
+                </div>
+
+                {/* Tools */}
+                <div style={{
+                  background: '#f8f9fa',
+                  borderRadius: '16px',
+                  padding: '1rem'
+                }}>
+                  <h3 style={{
+                    fontSize: '0.9rem',
+                    fontWeight: '600',
+                    color: '#333',
+                    marginBottom: '1rem'
+                  }}>
+                    ツール
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setTool('brush')}
+                      style={{
+                        padding: '0.75rem',
+                        background: tool === 'brush' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#fff',
+                        color: tool === 'brush' ? '#fff' : '#333',
+                        border: '2px solid ' + (tool === 'brush' ? '#667eea' : '#ddd'),
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Palette size={18} />
+                      ブラシ
+                    </button>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setTool('fill')}
+                      style={{
+                        padding: '0.75rem',
+                        background: tool === 'fill' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#fff',
+                        color: tool === 'fill' ? '#fff' : '#333',
+                        border: '2px solid ' + (tool === 'fill' ? '#667eea' : '#ddd'),
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <PaintBucket size={18} />
+                      塗りつぶし
+                    </button>
+                    <button
+                      className="tool-btn"
+                      onClick={() => setTool('eraser')}
+                      style={{
+                        padding: '0.75rem',
+                        background: tool === 'eraser' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#fff',
+                        color: tool === 'eraser' ? '#fff' : '#333',
+                        border: '2px solid ' + (tool === 'eraser' ? '#667eea' : '#ddd'),
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Eraser size={18} />
+                      消しゴム
+                    </button>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{
+                  background: '#f8f9fa',
+                  borderRadius: '16px',
+                  padding: '1rem'
+                }}>
+                  <h3 style={{
+                    fontSize: '0.9rem',
+                    fontWeight: '600',
+                    color: '#333',
+                    marginBottom: '1rem'
+                  }}>
+                    アクション
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {/* Undo/Redo */}
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="tool-btn"
+                        onClick={undo}
+                        disabled={historyIndex < 0}
+                        style={{
+                          flex: 1,
+                          padding: '0.75rem',
+                          background: '#fff',
+                          color: historyIndex < 0 ? '#ccc' : '#333',
+                          border: '2px solid #ddd',
+                          borderRadius: '12px',
+                          cursor: historyIndex < 0 ? 'not-allowed' : 'pointer',
+                          fontWeight: '600',
+                          fontSize: '0.9rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          justifyContent: 'center',
+                          opacity: historyIndex < 0 ? 0.5 : 1
+                        }}
+                      >
+                        <Undo2 size={18} />
+                        戻す
+                      </button>
+                      <button
+                        className="tool-btn"
+                        onClick={redo}
+                        disabled={historyIndex >= history.length - 1}
+                        style={{
+                          flex: 1,
+                          padding: '0.75rem',
+                          background: '#fff',
+                          color: historyIndex >= history.length - 1 ? '#ccc' : '#333',
+                          border: '2px solid #ddd',
+                          borderRadius: '12px',
+                          cursor: historyIndex >= history.length - 1 ? 'not-allowed' : 'pointer',
+                          fontWeight: '600',
+                          fontSize: '0.9rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          justifyContent: 'center',
+                          opacity: historyIndex >= history.length - 1 ? 0.5 : 1
+                        }}
+                      >
+                        <Redo2 size={18} />
+                        進む
+                      </button>
+                    </div>
+                    
+                    <label style={{
+                      padding: '0.75rem',
+                      background: '#fff',
+                      color: '#333',
+                      border: '2px solid #ddd',
+                      borderRadius: '12px',
+                      cursor: 'pointer',
+                      fontWeight: '600',
+                      fontSize: '0.9rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      justifyContent: 'center',
+                      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
+                    }}
+                    className="tool-btn">
+                      <Upload size={18} />
+                      別の画像
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        onClick={(e) => e.target.value = null}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                    <button
+                      className="tool-btn"
+                      onClick={clearCanvas}
+                      style={{
+                        padding: '0.75rem',
+                        background: '#fff',
+                        color: '#333',
+                        border: '2px solid #ddd',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <RotateCcw size={18} />
+                      リセット
+                    </button>
+                    <button
+                      className="tool-btn"
+                      onClick={downloadImage}
+                      style={{
+                        padding: '0.75rem',
+                        background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: '12px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '0.9rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <Download size={18} />
+                      保存
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Canvas Area - Always visible */}
+            <div style={{
+              background: '#fff',
+              borderRadius: '16px',
+              padding: '1rem',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              minHeight: '400px'
+            }}>
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                {/* 元画像レイヤー（白背景） */}
+                <canvas
+                  ref={imageCanvasRef}
+                  style={{
+                    border: '3px solid #e9ecef',
+                    borderRadius: '12px',
+                    maxWidth: '100%',
+                    height: 'auto',
+                    display: 'block',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                  }}
+                />
+                {/* 描画レイヤー（塗り絵） */}
+                <canvas
+                  ref={drawCanvasRef}
+                  onMouseDown={(e) => {
+                    if (tool === 'fill') {
+                      handleCanvasClick(e);
+                    } else {
+                      startDrawing(e);
+                    }
+                  }}
+                  onMouseMove={draw}
+                  onMouseUp={stopDrawing}
+                  onMouseLeave={stopDrawing}
+                  onTouchStart={(e) => {
+                    e.preventDefault();
+                    if (tool === 'fill') {
+                      handleCanvasClick(e);
+                    } else {
+                      startDrawing(e);
+                    }
+                  }}
+                  onTouchMove={(e) => {
+                    e.preventDefault();
+                    if (tool !== 'fill') {
+                      draw(e);
+                    }
+                  }}
+                  onTouchEnd={stopDrawing}
+                  style={{
+                    position: 'absolute',
+                    top: '0',
+                    left: '0',
+                    cursor: tool === 'fill' ? 'pointer' : (tool === 'brush' ? 'crosshair' : 'pointer'),
+                    maxWidth: '100%',
+                    height: 'auto',
+                    touchAction: 'none',
+                    pointerEvents: 'auto'
+                  }}
+                />
+                {/* 線画マスクレイヤー（最上位） */}
+                <canvas
+                  ref={lineCanvasRef}
+                  style={{
+                    position: 'absolute',
+                    top: '0',
+                    left: '0',
+                    maxWidth: '100%',
+                    height: 'auto',
+                    pointerEvents: 'none'
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
