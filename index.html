@@ -659,7 +659,7 @@
                 color: '#fff',
                 backdropFilter: 'blur(10px)'
               }}>
-                v1.0.1
+                v1.0.2
               </div>
               <p style={{
                 color: 'rgba(255,255,255,0.9)',
@@ -764,6 +764,45 @@
                             }}
                           />
                         ))}
+                      </div>
+                      <div style={{
+                        marginTop: '1rem',
+                        paddingTop: '1rem',
+                        borderTop: '1px solid #ddd'
+                      }}>
+                        <label style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          cursor: 'pointer'
+                        }}>
+                          <span style={{
+                            fontSize: '0.85rem',
+                            fontWeight: '600',
+                            color: '#555'
+                          }}>
+                            カスタム:
+                          </span>
+                          <input
+                            type="color"
+                            value={currentColor}
+                            onChange={(e) => setCurrentColor(e.target.value)}
+                            style={{
+                              width: '60px',
+                              height: '36px',
+                              border: '2px solid #667eea',
+                              borderRadius: '8px',
+                              cursor: 'pointer'
+                            }}
+                          />
+                          <span style={{
+                            fontSize: '0.75rem',
+                            color: '#888',
+                            fontFamily: 'monospace'
+                          }}>
+                            {currentColor}
+                          </span>
+                        </label>
                       </div>
                     </div>
 
