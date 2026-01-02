@@ -431,6 +431,10 @@
         const imgCtx = imageCanvas.getContext('2d');
         const originalData = imgCtx.getImageData(0, 0, canvas.width, canvas.height);
 
+        // 描画キャンバスのデータを取得して直接更新
+        const drawImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const drawData = drawImageData.data;
+
         const stack = [[x, y]];
         const visited = new Set();
         const maxIterations = 50000;
@@ -444,23 +448,37 @@
           if (visited.has(key)) continue;
           if (px < 0 || px >= canvas.width || py < 0 || py >= canvas.height) continue;
 
-          const currentColor = getPixelColor(data, px, py, canvas.width);
+          const pixelColor = getPixelColor(data, px, py, canvas.width);
 
           const origIndex = (py * canvas.width + px) * 4;
           const origBrightness = (originalData.data[origIndex] + originalData.data[origIndex + 1] + originalData.data[origIndex + 2]) / 3;
           if (origBrightness < brightnessThreshold) continue;
 
-          if (!colorsMatch(currentColor, targetColor)) continue;
+          if (!colorsMatch(pixelColor, targetColor)) continue;
 
           visited.add(key);
 
-          setPixelColor(ctx, px, py, fillColor);
+          // データ配列を直接更新
+          const index = (py * canvas.width + px) * 4;
+          drawData[index] = fillColor.r;
+          drawData[index + 1] = fillColor.g;
+          drawData[index + 2] = fillColor.b;
+          drawData[index + 3] = 255;
+
+          // 合成データも更新（次のピクセル判定用）
+          data[index] = fillColor.r;
+          data[index + 1] = fillColor.g;
+          data[index + 2] = fillColor.b;
+          data[index + 3] = 255;
 
           stack.push([px + 1, py]);
           stack.push([px - 1, py]);
           stack.push([px, py + 1]);
           stack.push([px, py - 1]);
         }
+
+        // 描画キャンバスに一度に反映
+        ctx.putImageData(drawImageData, 0, 0);
 
         saveToHistory();
       };
@@ -721,7 +739,6 @@
                             className="color-swatch"
                             onClick={() => {
                               setCurrentColor(color);
-                              setTool('brush');
                             }}
                             style={{
                               width: '36px',
