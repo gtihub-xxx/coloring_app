@@ -1,6 +1,6 @@
 {
   "name": "coloring-app",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Webブラウザで動作するぬりえアプリケーション",
   "main": "index.html",
   "scripts": {
