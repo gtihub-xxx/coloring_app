@@ -507,7 +507,7 @@
         } : { r: 0, g: 0, b: 0 };
       };
 
-      const colorsMatch = (a, b, tolerance = 10) => {
+      const colorsMatch = (a, b, tolerance = 35) => {
         return Math.abs(a.r - b.r) <= tolerance &&
                Math.abs(a.g - b.g) <= tolerance &&
                Math.abs(a.b - b.b) <= tolerance;
