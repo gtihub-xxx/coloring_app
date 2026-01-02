@@ -437,7 +437,7 @@
 
         const stack = [[x, y]];
         const visited = new Set();
-        const maxIterations = 50000;
+        const maxIterations = 200000;
         let iterations = 0;
 
         while (stack.length > 0 && iterations < maxIterations) {
@@ -507,7 +507,7 @@
         } : { r: 0, g: 0, b: 0 };
       };
 
-      const colorsMatch = (a, b, tolerance = 35) => {
+      const colorsMatch = (a, b, tolerance = 50) => {
         return Math.abs(a.r - b.r) <= tolerance &&
                Math.abs(a.g - b.g) <= tolerance &&
                Math.abs(a.b - b.b) <= tolerance;
