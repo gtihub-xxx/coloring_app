@@ -150,6 +150,7 @@
       const [uploadedImage, setUploadedImage] = useState(null);
       const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
       const [brightnessThreshold, setBrightnessThreshold] = useState(180);
+      const [fillRange, setFillRange] = useState(0); // 0 = 無制限
       const [history, setHistory] = useState([]);
       const [historyIndex, setHistoryIndex] = useState(-1);
       const maxHistory = 20;
@@ -351,16 +352,18 @@
       };
 
       const undo = () => {
-        if (historyIndex <= 0) {
-          const canvas = drawCanvasRef.current;
-          const ctx = canvas.getContext('2d');
+        if (historyIndex < 0) return;
+
+        const canvas = drawCanvasRef.current;
+        const ctx = canvas.getContext('2d');
+
+        if (historyIndex === 0) {
+          // 最初の状態に戻る = キャンバスをクリア
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           setHistoryIndex(-1);
           return;
         }
 
-        const canvas = drawCanvasRef.current;
-        const ctx = canvas.getContext('2d');
         const img = new Image();
 
         img.onload = () => {
@@ -447,6 +450,12 @@
 
           if (visited.has(key)) continue;
           if (px < 0 || px >= canvas.width || py < 0 || py >= canvas.height) continue;
+
+          // 範囲制限チェック（fillRange > 0 の場合のみ）
+          if (fillRange > 0) {
+            const distance = Math.sqrt((px - x) ** 2 + (py - y) ** 2);
+            if (distance > fillRange) continue;
+          }
 
           const pixelColor = getPixelColor(data, px, py, canvas.width);
 
@@ -659,7 +668,7 @@
                 color: '#fff',
                 backdropFilter: 'blur(10px)'
               }}>
-                v1.0.2
+                v1.0.4
               </div>
               <p style={{
                 color: 'rgba(255,255,255,0.9)',
@@ -872,6 +881,82 @@
                           cursor: 'pointer'
                         }}
                       />
+                    </div>
+
+                    <div style={{
+                      background: '#f8f9fa',
+                      borderRadius: '16px',
+                      padding: '1rem'
+                    }}>
+                      <h3 style={{
+                        fontSize: '0.9rem',
+                        fontWeight: '600',
+                        color: '#333',
+                        marginBottom: '1rem'
+                      }}>
+                        塗りつぶし範囲
+                      </h3>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        marginBottom: '0.5rem'
+                      }}>
+                        <button
+                          className="tool-btn"
+                          onClick={() => setFillRange(Math.max(0, fillRange - 20))}
+                          style={{
+                            padding: '0.5rem',
+                            background: '#fff',
+                            border: '2px solid #ddd',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Minus size={16} />
+                        </button>
+                        <div style={{
+                          flex: 1,
+                          textAlign: 'center',
+                          fontSize: '1.1rem',
+                          fontWeight: '600',
+                          color: '#667eea'
+                        }}>
+                          {fillRange === 0 ? '無制限' : `${fillRange}px`}
+                        </div>
+                        <button
+                          className="tool-btn"
+                          onClick={() => setFillRange(Math.min(500, fillRange + 20))}
+                          style={{
+                            padding: '0.5rem',
+                            background: '#fff',
+                            border: '2px solid #ddd',
+                            borderRadius: '8px',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Plus size={16} />
+                        </button>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="500"
+                        value={fillRange}
+                        onChange={(e) => setFillRange(Number(e.target.value))}
+                        style={{
+                          width: '100%',
+                          cursor: 'pointer'
+                        }}
+                      />
+                      <p style={{
+                        fontSize: '0.75rem',
+                        color: '#888',
+                        marginTop: '0.5rem',
+                        textAlign: 'center'
+                      }}>
+                        0 = 領域全体、1〜500 = 指定範囲のみ
+                      </p>
                     </div>
 
                     <div style={{
